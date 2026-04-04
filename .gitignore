@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.ipr
+*.iws
+*.iml
+.classpath
+.project
+.settings/
+.vscode/
+bin/
+out/
+
+# Log
+*.log
+build_errors.txt
+build_errors_120.txt
+
+# Minecraft
+run/
+
+# OS
+.DS_Store
+Thumbs.db

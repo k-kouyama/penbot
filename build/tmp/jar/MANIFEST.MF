@@ -1,8 +1,0 @@
-Manifest-Version: 1.0
-Specification-Title: penbot
-Specification-Vendor: example
-Specification-Version: 1
-Implementation-Title: baryonic-planetarium
-Implementation-Version: 1.0.0
-Implementation-Vendor: example
-

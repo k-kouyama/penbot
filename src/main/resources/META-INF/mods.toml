@@ -1,5 +1,5 @@
 modLoader="javafml"
-loaderVersion="[51,)"
+loaderVersion="[61,)"
 license="MIT"
 showAsResourcePack=false
 
@@ -9,19 +9,19 @@ version="${file.jarVersion}"
 displayName="Penbot Mod"
 authors="AI Assistant"
 description='''
-Penbot Mod (1.21). Adds a conversational penguin AI entity.
+Penbot Mod. Adds a conversational penguin AI entity.
 '''
 
 [[dependencies.penbot]]
     modId="forge"
     mandatory=true
-    versionRange="[51,)"
+    versionRange="[61,)"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.penbot]]
     modId="minecraft"
     mandatory=true
-    versionRange="[1.21.1,1.22)"
+    versionRange="[1.21.11,1.22)"
     ordering="NONE"
     side="BOTH"

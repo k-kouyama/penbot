@@ -1,105 +1,187 @@
 package com.example.penbot.entity;
 
+import com.example.penbot.PenbotMod;
 import com.example.penbot.entity.ai.MoveToIceGoal;
-import com.example.penbot.llm.OllamaClient;
-import net.minecraft.nbt.CompoundTag;
+import com.example.penbot.llm.LMStudioClient;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.DifficultyInstance;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.MobSpawnType;
-import net.minecraft.world.entity.PathfinderMob;
-import net.minecraft.world.entity.SpawnGroupData;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.MoveToBlockGoal;
-import net.minecraft.world.entity.ai.goal.PanicGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
+import net.minecraft.world.entity.ai.goal.*;
+import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.pathfinder.PathType;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Random;
 
-public class PenbotEntity extends PathfinderMob {
-    private static final String[] NAMES = {"ペン吉", "ペン太郎", "ペン子", "ピーちゃん", "銀河ペンギン", "皇帝ペンギンジュニア"};
-    private int mutterTimer;
+public class PenbotEntity extends Animal {
+    private static final String[] NAMES = { "ペン吉", "ぺん太郎", "ペン子", "ピーちゃん", "ペンペン", "南極の主", "氷の王", "魚泥棒" };
+    private int chatTimer = 0;
+    private int conversationCooldown = 0;
+    private int delayedResponseTicks = -1;
+    private String pendingResponsePrompt = "";
+    private PenbotEntity pendingTarget = null;
+    private int currentDepth = 0;
+    private static final int MAX_CONVERSATION_DEPTH = 3;
 
-    public PenbotEntity(EntityType<? extends PathfinderMob> type, Level level) {
+    public PenbotEntity(EntityType<? extends Animal> type, Level level) {
         super(type, level);
-        this.mutterTimer = this.random.nextInt(6000) + 6000; // 5 to 10 minutes (1 min = 1200 ticks)
-    }
-
-    public static AttributeSupplier.Builder createAttributes() {
-        return PathfinderMob.createMobAttributes()
-                .add(Attributes.MAX_HEALTH, 10.0D)
-                .add(Attributes.MOVEMENT_SPEED, 0.25D)
-                .add(Attributes.ATTACK_DAMAGE, 0.0D);
+        this.setPathfindingMalus(PathType.WATER, 0.0f);
+        this.setPersistenceRequired();
     }
 
     @Override
     protected void registerGoals() {
-        // Runs away when attacked (Panic)
+        this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new PanicGoal(this, 1.5D));
-        
-        // Move towards water if nearby
-        this.goalSelector.addGoal(2, new MoveToBlockGoal(this, 1.0D, 8) {
-            @Override
-            protected boolean isValidTarget(LevelReader level, BlockPos pos) {
-                BlockState state = level.getBlockState(pos);
-                return state.is(Blocks.WATER);
-            }
-        });
-
-        // Move to Ice Goal
-        this.goalSelector.addGoal(3, new MoveToIceGoal(this, 1.0D, 12));
-
-        // Walking around randomly
-        this.goalSelector.addGoal(4, new WaterAvoidingRandomStrollGoal(this, 1.0D));
-
-        // Looking at Player and Randomly
-        this.goalSelector.addGoal(5, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(6, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, Player.class, 10.0F));
+        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, PenbotEntity.class, 8.0F));
+        this.goalSelector.addGoal(3, new MoveToIceGoal(this, 1.0D, 10));
+        this.goalSelector.addGoal(4, new RandomStrollGoal(this, 0.8D));
+        this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(1, new BreedGoal(this, 1.0D));
     }
 
-    @Nullable
+    public static AttributeSupplier.Builder createAttributes() {
+        return Mob.createMobAttributes()
+                .add(Attributes.MAX_HEALTH, 20.0D)
+                .add(Attributes.MOVEMENT_SPEED, 0.25D);
+    }
+
     @Override
-    public SpawnGroupData finalizeSpawn(ServerLevelAccessor level, DifficultyInstance difficulty, MobSpawnType reason, @Nullable SpawnGroupData spawnData) {
-        Random rand = new Random();
-        String chosenName = NAMES[rand.nextInt(NAMES.length)];
-        this.setCustomName(Component.literal(chosenName));
+    public SpawnGroupData finalizeSpawn(ServerLevelAccessor level, DifficultyInstance difficulty,
+            EntitySpawnReason reason, @Nullable SpawnGroupData spawnData) {
+        String randomName = NAMES[new Random().nextInt(NAMES.length)];
+        this.setCustomName(Component.literal(randomName));
         this.setCustomNameVisible(true);
         return super.finalizeSpawn(level, difficulty, reason, spawnData);
     }
 
     @Override
-    public void tick() {
-        super.tick();
-        if (!this.level().isClientSide) {
-            this.mutterTimer--;
-            if (this.mutterTimer <= 0) {
-                this.mutterTimer = this.random.nextInt(6000) + 6000;
-                this.speak("現在の状況について、何か短い独り言をつぶやいてください。");
+    public void aiStep() {
+        super.aiStep();
+        if (!this.level().isClientSide() && this.isAlive()) {
+            chatTimer++;
+            if (conversationCooldown > 0) {
+                conversationCooldown--;
+            }
+
+            // 遅延返答の処理 (Game Thread で安全に実行)
+            if (delayedResponseTicks > 0) {
+                delayedResponseTicks--;
+                if (delayedResponseTicks == 0) {
+                    processDelayedResponse();
+                }
+            }
+
+            // 独り言または他のペンギンとの会話開始
+            if (chatTimer >= 400 + new Random().nextInt(800)) { // 20秒〜60秒おき
+                chatTimer = 0;
+                if (conversationCooldown <= 0 && new Random().nextFloat() < 0.3F) {
+                    checkForNearbyPenbots();
+                } else {
+                    handleSoliloquy();
+                }
             }
         }
     }
 
-    public void speak(String prompt) {
-        if (this.level().isClientSide) return;
-        
-        String myName = this.hasCustomName() ? this.getCustomName().getString() : "ペンギン";
-        
-        OllamaClient.generateResponse(prompt).thenAccept(reply -> {
-            this.level().getServer().execute(() -> {
-                Component message = Component.literal("<" + myName + "> " + reply);
-                this.level().getServer().getPlayerList().broadcastSystemMessage(message, false);
-            });
+    private void checkForNearbyPenbots() {
+        List<PenbotEntity> others = this.level().getEntitiesOfClass(PenbotEntity.class,
+                this.getBoundingBox().inflate(8.0D));
+        others.remove(this);
+        if (!others.isEmpty()) {
+            PenbotEntity target = others.get(new Random().nextInt(others.size()));
+            initiateConversation(target);
+        }
+    }
+
+    private void initiateConversation(PenbotEntity target) {
+        this.conversationCooldown = 6000;
+        String targetName = target.getCustomName() != null ? target.getCustomName().getString() : "仲間";
+        String prompt = String.format("あなたはペンギンです。近くにいる仲間のペンギン「%s」に短く日本語で話しかけてください。", targetName);
+
+        LMStudioClient.ask(prompt, response -> {
+            broadcastMessage(response);
+            target.receiveMessage(this, response, 1);
         });
+    }
+
+    public void receiveMessage(PenbotEntity sender, String message, int depth) {
+        if (depth > MAX_CONVERSATION_DEPTH)
+            return;
+        this.conversationCooldown = 2000;
+        this.currentDepth = depth;
+        this.pendingTarget = sender;
+
+        String senderName = sender.getCustomName() != null ? sender.getCustomName().getString() : "仲間";
+        this.pendingResponsePrompt = String.format("あなたはペンギンです。仲間のペンギン「%s」から「%s」と話しかけられました。それに対して短く日本語で返答してください。",
+                senderName, message);
+
+        // 2〜4秒のランダムな遅延を設定
+        this.delayedResponseTicks = 40 + new Random().nextInt(40);
+    }
+
+    private void processDelayedResponse() {
+        if (pendingResponsePrompt.isEmpty() || pendingTarget == null)
+            return;
+
+        LMStudioClient.ask(pendingResponsePrompt, response -> {
+            broadcastMessage(response);
+            if (pendingTarget.isAlive()) {
+                pendingTarget.receiveMessage(this, response, currentDepth + 1);
+            }
+            pendingResponsePrompt = "";
+            pendingTarget = null;
+        });
+    }
+
+    public void speak(String context) {
+        if (this.level().isClientSide())
+            return;
+        LMStudioClient.ask(context, response -> {
+            broadcastMessage(response);
+        });
+    }
+
+    private void broadcastMessage(String message) {
+        if (this.level() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().getPlayerList().broadcastSystemMessage(
+                    Component.literal("<" + this.getCustomName().getString() + "> " + message),
+                    false);
+        }
+    }
+
+    private void handleSoliloquy() {
+        speak("あなたはペンギンです。独り言を日本語の一言でいってください。");
+    }
+
+    @Override
+    public void die(DamageSource damageSource) {
+        super.die(damageSource);
+    }
+
+    @Nullable
+    @Override
+    public AgeableMob getBreedOffspring(ServerLevel serverLevel, AgeableMob ageableMob) {
+        return PENBOT_CREATE_HACK(serverLevel);
+    }
+
+    private AgeableMob PENBOT_CREATE_HACK(ServerLevel level) {
+        PenbotEntity bot = PenbotMod.PENBOT.get().create(level, EntitySpawnReason.BREEDING);
+        return bot;
+    }
+
+    @Override
+    public boolean isFood(net.minecraft.world.item.ItemStack stack) {
+        return stack.is(net.minecraft.world.item.Items.COD);
     }
 }
