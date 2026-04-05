@@ -30,7 +30,7 @@ public class PenbotEntity extends Animal {
     private String pendingResponsePrompt = "";
     private PenbotEntity pendingTarget = null;
     private int currentDepth = 0;
-    private static final int MAX_CONVERSATION_DEPTH = 3;
+    private static final int MAX_CONVERSATION_DEPTH = 10;
     private String lastResponseId = null;
 
     public PenbotEntity(EntityType<? extends Animal> type, Level level) {
@@ -86,7 +86,7 @@ public class PenbotEntity extends Animal {
             // 独り言または他のペンギンとの会話開始
             if (chatTimer >= 400 + new Random().nextInt(800)) { // 20秒〜60秒おき
                 chatTimer = 0;
-                if (conversationCooldown <= 0 && new Random().nextFloat() < 0.3F) {
+                if (conversationCooldown <= 0 && new Random().nextFloat() < 0.5F) {
                     checkForNearbyPenbots();
                 } else {
                     handleSoliloquy();
@@ -106,15 +106,19 @@ public class PenbotEntity extends Animal {
     }
 
     private void initiateConversation(PenbotEntity target) {
-        this.conversationCooldown = 6000;
+        this.conversationCooldown = 800; // 40秒程度のクールダウン
+        this.pendingTarget = target;
         String targetName = target.getCustomName() != null ? target.getCustomName().getString() : "仲間";
-        String prompt = String.format("あなたはペンギンです。近くにいる仲間のペンギン「%s」に短く日本語で話しかけてください。", targetName);
+        String prompt = String.format("あなたはペンギンです。近くにいる仲間のペンギン「%s」に短く日本語で一言、挨拶や興味深いことを話しかけてください。返答は1文程度にしてください。", targetName);
+
+        // 相手を見る
+        this.getLookControl().setLookAt(target, 30.0F, 30.0F);
 
         LMStudioClient.askStateful(prompt, this.lastResponseId, (response, nextId) -> {
             if (this.level() instanceof ServerLevel serverLevel) {
                 serverLevel.getServer().execute(() -> {
                     this.lastResponseId = nextId;
-                    broadcastMessage(response);
+                    broadcastMessage(response, false);
                     target.receiveMessage(this, response, 1);
                 });
             }
@@ -124,12 +128,16 @@ public class PenbotEntity extends Animal {
     public void receiveMessage(PenbotEntity sender, String message, int depth) {
         if (depth > MAX_CONVERSATION_DEPTH)
             return;
-        this.conversationCooldown = 2000;
+        
+        // 相手に注目する
+        this.getLookControl().setLookAt(sender, 30.0F, 30.0F);
+        
+        this.conversationCooldown = 400; // 返信中は新たな自律会話を抑制
         this.currentDepth = depth;
         this.pendingTarget = sender;
 
         String senderName = sender.getCustomName() != null ? sender.getCustomName().getString() : "仲間";
-        this.pendingResponsePrompt = String.format("あなたはペンギンです。仲間のペンギン「%s」から「%s」と話しかけられました。それに対して短く日本語で返答してください。",
+        this.pendingResponsePrompt = String.format("あなたはペンギンです。仲間のペンギン「%s」から「%s」と話しかけられました。それに対して短く日本語で、ペンギンらしく一言で返答してください。",
                 senderName, message);
 
         // 2〜4秒のランダムな遅延を設定
@@ -140,11 +148,16 @@ public class PenbotEntity extends Animal {
         if (pendingResponsePrompt.isEmpty() || pendingTarget == null)
             return;
 
+        // 返答時も相手を見る
+        if (pendingTarget != null) {
+            this.getLookControl().setLookAt(pendingTarget, 30.0F, 30.0F);
+        }
+
         LMStudioClient.askStateful(pendingResponsePrompt, this.lastResponseId, (response, nextId) -> {
             if (this.level() instanceof ServerLevel serverLevel) {
                 serverLevel.getServer().execute(() -> {
                     this.lastResponseId = nextId;
-                    broadcastMessage(response);
+                    broadcastMessage(response, true);
                     if (pendingTarget != null && pendingTarget.isAlive()) {
                         pendingTarget.receiveMessage(this, response, currentDepth + 1);
                     }
@@ -162,17 +175,29 @@ public class PenbotEntity extends Animal {
             if (this.level() instanceof ServerLevel serverLevel) {
                 serverLevel.getServer().execute(() -> {
                     this.lastResponseId = nextId;
-                    broadcastMessage(response);
+                    broadcastMessage(response, false);
                 });
             }
         });
     }
 
-    private void broadcastMessage(String message) {
+    private void broadcastMessage(String message, boolean isTargeted) {
         if (this.level() instanceof ServerLevel serverLevel) {
             serverLevel.getServer().getPlayerList().broadcastSystemMessage(
                     Component.literal("<" + this.getCustomName().getString() + "> " + message),
                     false);
+            
+            // 近所のペンギンが「立ち聞き」して会話に参加する確率
+            if (!isTargeted) {
+                List<PenbotEntity> others = this.level().getEntitiesOfClass(PenbotEntity.class,
+                        this.getBoundingBox().inflate(6.0D));
+                for (PenbotEntity other : others) {
+                    if (other != this && other.conversationCooldown <= 0 && new Random().nextFloat() < 0.2F) {
+                        other.receiveMessage(this, message, 1);
+                        break; // 1人だけが参加するようにする
+                    }
+                }
+            }
         }
     }
 
