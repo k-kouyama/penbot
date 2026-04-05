@@ -31,6 +31,7 @@ public class PenbotEntity extends Animal {
     private PenbotEntity pendingTarget = null;
     private int currentDepth = 0;
     private static final int MAX_CONVERSATION_DEPTH = 3;
+    private String lastResponseId = null;
 
     public PenbotEntity(EntityType<? extends Animal> type, Level level) {
         super(type, level);
@@ -109,9 +110,14 @@ public class PenbotEntity extends Animal {
         String targetName = target.getCustomName() != null ? target.getCustomName().getString() : "仲間";
         String prompt = String.format("あなたはペンギンです。近くにいる仲間のペンギン「%s」に短く日本語で話しかけてください。", targetName);
 
-        LMStudioClient.ask(prompt, response -> {
-            broadcastMessage(response);
-            target.receiveMessage(this, response, 1);
+        LMStudioClient.askStateful(prompt, this.lastResponseId, (response, nextId) -> {
+            if (this.level() instanceof ServerLevel serverLevel) {
+                serverLevel.getServer().execute(() -> {
+                    this.lastResponseId = nextId;
+                    broadcastMessage(response);
+                    target.receiveMessage(this, response, 1);
+                });
+            }
         });
     }
 
@@ -134,21 +140,31 @@ public class PenbotEntity extends Animal {
         if (pendingResponsePrompt.isEmpty() || pendingTarget == null)
             return;
 
-        LMStudioClient.ask(pendingResponsePrompt, response -> {
-            broadcastMessage(response);
-            if (pendingTarget.isAlive()) {
-                pendingTarget.receiveMessage(this, response, currentDepth + 1);
+        LMStudioClient.askStateful(pendingResponsePrompt, this.lastResponseId, (response, nextId) -> {
+            if (this.level() instanceof ServerLevel serverLevel) {
+                serverLevel.getServer().execute(() -> {
+                    this.lastResponseId = nextId;
+                    broadcastMessage(response);
+                    if (pendingTarget != null && pendingTarget.isAlive()) {
+                        pendingTarget.receiveMessage(this, response, currentDepth + 1);
+                    }
+                    pendingResponsePrompt = "";
+                    pendingTarget = null;
+                });
             }
-            pendingResponsePrompt = "";
-            pendingTarget = null;
         });
     }
 
     public void speak(String context) {
         if (this.level().isClientSide())
             return;
-        LMStudioClient.ask(context, response -> {
-            broadcastMessage(response);
+        LMStudioClient.askStateful(context, this.lastResponseId, (response, nextId) -> {
+            if (this.level() instanceof ServerLevel serverLevel) {
+                serverLevel.getServer().execute(() -> {
+                    this.lastResponseId = nextId;
+                    broadcastMessage(response);
+                });
+            }
         });
     }
 
